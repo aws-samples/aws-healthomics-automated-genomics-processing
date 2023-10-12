@@ -1,0 +1,23 @@
+{
+  "name": "DemoTetraTeam",
+  "description": "Demo",
+  "sequencer_platform": "illumina",
+  "input_path": "/",
+  "reference_genome": "digitallabhg38",
+  "run_params": [
+    {
+      "platform": "illumina",
+      "source1": "C0L01ACXX.1.5-percent.R1.fastq.gz",
+      "source2": "C0L01ACXX.1.5-percent.R2.fastq.gz",
+      "read_group": "C0L01ACXX.1"
+    }
+  ],
+  "workflow": {
+    "id": "9500764",
+    "type": "READY2RUN"
+  },
+  "output": {
+    "tetrascience": true,
+    "variant_store": true
+  }
+}

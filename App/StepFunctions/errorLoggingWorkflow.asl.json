@@ -1,0 +1,10 @@
+{
+  "Comment": "A placeholder statemachine for custom error handling.",
+  "StartAt": "Placeholder",
+  "States": {
+    "Placeholder": {
+      "Type": "Pass",
+      "End": true
+    }
+  }
+}

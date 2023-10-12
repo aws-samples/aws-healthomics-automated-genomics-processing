@@ -1,0 +1,105 @@
+{
+  "Comment": "A description of my state machine",
+  "StartAt": "DynamoDB GetItem",
+  "States": {
+    "DynamoDB GetItem": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:getItem",
+      "Parameters": {
+        "TableName": ${DYNAMO_TABLE},
+        "Key": {
+          "Id": {
+            "S.$": "$.detail.id"
+          }
+        }
+      },
+      "ResultSelector": {
+        "Data.$": "States.StringToJson($.Item.Data.S)"
+      },
+      "ResultPath": "$",
+      "OutputPath": "$.Data",
+      "Next": "Lambda Invoke",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "ErrorHandling"
+        }
+      ]
+    },
+    "Lambda Invoke": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "Payload.$": "$",
+        "FunctionName": ${LAMBDA_FUNCTION}
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 6,
+          "BackoffRate": 2
+        }
+      ],
+      "ResultSelector": {
+        "Id.$": "$.Payload.id"
+      },
+      "ResultPath": "$.OmicsRun",
+      "Next": "DynamoDB PutItem",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "ErrorHandling"
+        }
+      ]
+    },
+    "DynamoDB PutItem": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:putItem",
+      "Parameters": {
+        "TableName": ${DYNAMO_TABLE},
+        "Item": {
+          "Type": {
+            "S": "RunProcessing"
+          },
+          "Id": {
+            "S.$": "$.OmicsRun.Id"
+          },
+          "Data": {
+            "S.$": "States.JsonToString($)"
+          }
+        }
+      },
+      "End": true,
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "ErrorHandling"
+        }
+      ]
+    },
+    "ErrorHandling": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::states:startExecution",
+      "Parameters": {
+        "StateMachineArn": ${ERROR_LOGGING_WORKFLOW},
+        "Input": {
+          "StatePayload.$": "$",
+          "AWS_STEP_FUNCTIONS_STARTED_BY_EXECUTION_ID.$": "$$.Execution.Id"
+        }
+      },
+      "End": true
+    }
+  }
+}

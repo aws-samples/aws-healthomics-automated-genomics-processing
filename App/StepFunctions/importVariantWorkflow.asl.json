@@ -1,0 +1,131 @@
+{
+  "Comment": "A description of my state machine",
+  "StartAt": "DynamoDB GetItem",
+  "States": {
+    "DynamoDB GetItem": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:getItem",
+      "Parameters": {
+        "TableName": ${DYNAMO_TABLE},
+        "Key": {
+          "Id": {
+            "S.$": "States.ArrayGetItem(States.StringSplit($.detail.arn, '/'),1)"
+          }
+        }
+      },
+      "ResultSelector": {
+        "Data.$": "States.StringToJson($.Item.Data.S)"
+      },
+      "ResultPath": "$",
+      "OutputPath": "$.Data",
+      "Next": "ListObjectsV2",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Error Handling",
+          "ResultPath": "$.Error"
+        }
+      ]
+    },
+    "ListObjectsV2": {
+      "Type": "Task",
+      "Next": "Parallel",
+      "Parameters": {
+        "Bucket.$": "$.bucket",
+        "Prefix.$": "States.Format('out/{}/out/output_vcf/', $.OmicsRun.Id)"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:s3:listObjectsV2",
+      "ResultPath": "$.BucketContents",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Error Handling",
+          "ResultPath": "$.Error"
+        }
+      ]
+    },
+    "Parallel": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "StartVariantImportJob",
+          "States": {
+            "StartVariantImportJob": {
+              "Type": "Task",
+              "Parameters": {
+                "DestinationName.$": "$.var_store",
+                "Items": [
+                  {
+                    "Source.$": "States.Format('s3://{}/{}', $.bucket, $.BucketContents.Contents[0].Key)"
+                  }
+                ],
+                "RoleArn.$": "$.iam_role"
+              },
+              "Resource": "arn:aws:states:::aws-sdk:omics:startVariantImportJob",
+              "ResultPath": "$.VariantJob",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "Lambda Invoke",
+          "States": {
+            "Lambda Invoke": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "OutputPath": "$.Payload",
+              "Parameters": {
+                "FunctionName": ${LAMBDA_FUNCTION},
+                "Payload": {
+                  "Bucket.$": "$.bucket",
+                  "Key.$": "$.BucketContents.Contents[0].Key",
+                  "Name.$": "States.Format('{}-{}.vcf.gz', $.name, $.id)"
+                }
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException",
+                    "Lambda.TooManyRequestsException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+                }
+              ],
+              "End": true
+            }
+          }
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.Error",
+          "Next": "Error Handling"
+        }
+      ],
+      "End": true
+    },
+    "Error Handling": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::states:startExecution",
+      "Parameters": {
+        "StateMachineArn": ${ERROR_LOGGING_WORKFLOW},
+        "Input": {
+          "StatePayload.$": "$",
+          "AWS_STEP_FUNCTIONS_STARTED_BY_EXECUTION_ID.$": "$$.Execution.Id"
+        }
+      },
+      "End": true
+    }
+  }
+}

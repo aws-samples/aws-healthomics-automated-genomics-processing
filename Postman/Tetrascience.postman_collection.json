@@ -1,0 +1,168 @@
+{
+	"info": {
+		"_postman_id": "28c587b4-4cb7-4127-b75b-1fc500281792",
+		"name": "Tetrascience",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "3376098"
+	},
+	"item": [
+		{
+			"name": "Search Files",
+			"request": {
+				"method": "GET",
+				"header": []
+			},
+			"response": []
+		},
+		{
+			"name": "Search Files v2",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": ""
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get File",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "x-org-slug",
+						"value": "{{ORGSLUG}}",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{BASE}}/v1/datalake/retrieve?fileId=x&getPresigned=true",
+					"host": [
+						"{{BASE}}"
+					],
+					"path": [
+						"v1",
+						"datalake",
+						"retrieve"
+					],
+					"query": [
+						{
+							"key": "fileId",
+							"value": "x"
+						},
+						{
+							"key": "getPresigned",
+							"value": "true"
+						}
+					]
+				},
+				"description": "Gets an S3 Pre-signed URL which would be ideal for S3 to S3 migrations"
+			},
+			"response": []
+		},
+		{
+			"name": "Upload File",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "x-org-slug",
+						"value": "{{ORGSLUG}}",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "file",
+							"type": "file",
+							"src": []
+						},
+						{
+							"key": "agentId",
+							"value": "x",
+							"type": "text"
+						},
+						{
+							"key": "filePath",
+							"value": "test.txt",
+							"type": "text"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{BASE}}/v1/data-acquisition/agent/upload?file=sampleFile.txt&agentId=x&sourceType=unknown",
+					"host": [
+						"{{BASE}}"
+					],
+					"path": [
+						"v1",
+						"data-acquisition",
+						"agent",
+						"upload"
+					],
+					"query": [
+						{
+							"key": "file",
+							"value": "sampleFile.txt"
+						},
+						{
+							"key": "agentId",
+							"value": "x"
+						},
+						{
+							"key": "sourceType",
+							"value": "unknown"
+						}
+					]
+				},
+				"description": "Gets an S3 Pre-signed URL which would be ideal for S3 to S3 migrations"
+			},
+			"response": []
+		}
+	],
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "",
+				"type": "string"
+			}
+		]
+	},
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "BASE",
+			"value": "https://api.tdp.tetrascience.com",
+			"type": "string"
+		},
+		{
+			"key": "ORGSLUG",
+			"value": "x",
+			"type": "string"
+		}
+	]
+}

@@ -1,0 +1,473 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Digital Lab with TetraScience and Amazon Omics
+
+  Solution for deploying a managed multi-omics sequence to variant calling conversion pipeline.
+
+Globals:
+  Function:
+    Timeout: 10
+    MemorySize: 128
+
+Parameters:
+  TDPToken:
+    NoEcho: true
+    Description: Please input the TertraScience JWT service token.
+    Type: String
+    MinLength: "32"
+    MaxLength: "512"
+  TDPAPIEndpoint:
+    Default: "https://api.tetrascience.com"
+    Description: Please specify a custom endpoint for Tetrascience
+    Type: String
+    MinLength: "12"
+    MaxLength: "128"
+  TDPOrg:
+    NoEcho: true
+    Description: Please specify the Organisation Slug for the Tetrascience account
+    Type: String
+    MinLength: "1"
+    MaxLength: "128"
+
+Resources:
+  #Step Functions Workflows
+  ErrorLoggingWorkflow:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: StepFunctions/errorLoggingWorkflow.asl.json
+      Role: !GetAtt StatesRole.Arn
+      Tracing:
+        Enabled: true
+
+  ReadsetImportWorkflow:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: StepFunctions/readsetImportWorkflow.asl.json
+      Role: !GetAtt StatesRole.Arn
+      Tracing:
+        Enabled: true
+      DefinitionSubstitutions:
+        DYNAMO_TABLE: !Ref DigitalLabDynamoDB
+        ERROR_LOGGING_WORKFLOW: !Ref ErrorLoggingWorkflow
+
+  StartOmicsRunWorkflow:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: StepFunctions/startOmicsRunWorkflow.asl.json
+      Role: !GetAtt StatesRole.Arn
+      Tracing:
+        Enabled: true
+      DefinitionSubstitutions:
+        DYNAMO_TABLE: !Ref DigitalLabDynamoDB
+        ERROR_LOGGING_WORKFLOW: !Ref ErrorLoggingWorkflow
+        LAMBDA_FUNCTION: !Ref StartWorkflow
+
+  ImportVariantWorkflow:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: StepFunctions/importVariantWorkflow.asl.json
+      Role: !GetAtt StatesRole.Arn
+      Tracing:
+        Enabled: true
+      DefinitionSubstitutions:
+        DYNAMO_TABLE: !Ref DigitalLabDynamoDB
+        ERROR_LOGGING_WORKFLOW: !Ref ErrorLoggingWorkflow
+        LAMBDA_FUNCTION: !Ref TetraUpload
+
+  #Lambdas
+  ValidateMetadata:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: Lambda/validate_metadata/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Timeout: 60
+      MemorySize: 256
+      EphemeralStorage:
+        Size: 1024
+      Environment:
+        Variables:
+          IAM_ROLE: !GetAtt OmicsRole.Arn
+          REF_STORE: !GetAtt OmicsReferenceStore.ReferenceStoreId
+          SEQ_STORE: !GetAtt OmicsSequenceStore.SequenceStoreId
+          BUCKET: !Sub "digitallab-tetraomics-${AWS::AccountId}"
+          STATE_MACHINE: !GetAtt ReadsetImportWorkflow.Arn
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource: "arn:aws:s3:::*"
+            - Effect: Allow
+              Action:
+                - omics:ListReferences
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - states:StartExecution
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - iam:PassRole
+                - iam:GetRole
+              Resource: !GetAtt OmicsRole.Arn
+      Events:
+        BucketEvent:
+          Type: S3
+          Properties:
+            Bucket: !Ref DigitalLabBucket
+            Events:
+              - "s3:ObjectCreated:*"
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: ".mdata.json"
+
+  RefStoreProcessor:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: Lambda/fill_ref_store/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Timeout: 600
+      MemorySize: 256
+      EphemeralStorage:
+        Size: 1024
+      Environment:
+        Variables:
+          IAM_ROLE: !GetAtt OmicsRole.Arn
+          REF_STORE: !GetAtt OmicsReferenceStore.ReferenceStoreId
+          BUCKET: !Sub "digitallab-tetraomics-${AWS::AccountId}"
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - omics:CreateVariantStore
+                - omics:StartReferenceImportJob
+                - omics:Get*
+                - omics:List*
+                - omics:TagResource
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - iam:PassRole
+                - iam:GetRole
+              Resource:
+                - !GetAtt OmicsRole.Arn
+      Events:
+        BucketEvent:
+          Type: S3
+          Properties:
+            Bucket: !Ref DigitalLabBucket
+            Events:
+              - "s3:ObjectCreated:*"
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: ".fa"
+
+  TetraUpload:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: Lambda/tetraupload/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Timeout: 600
+      MemorySize: 256
+      EphemeralStorage:
+        Size: 1024
+      Environment:
+        Variables:
+          TETRA_SECRETS: !GetAtt TetraSecret.Id
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - s3:Get*
+              Resource: "arn:aws:s3:::*"
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref TetraSecret
+
+  StartWorkflow:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: Lambda/start_workflow/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Timeout: 30
+      MemorySize: 128
+      EphemeralStorage:
+        Size: 1024
+      Environment:
+        Variables:
+          BUCKET: !Sub "digitallab-tetraomics-${AWS::AccountId}"
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - omics:StartRun
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - iam:PassRole
+                - iam:GetRole
+              Resource:
+                - !GetAtt OmicsRole.Arn
+
+  #EventBridge Rules
+  CompletedReadsetImport:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName: default
+      EventPattern:
+        source:
+          - aws.omics
+        detail-type:
+          - Read Set Import Job Status Change
+        detail:
+          status:
+            - COMPLETED
+          sequenceStoreId:
+            - !GetAtt OmicsSequenceStore.SequenceStoreId
+      Name: Workflow-CompleteReadsetImport
+      State: ENABLED
+      Targets:
+        - Id: Id45b0e372-8590-4ed9-81da-2b35987a57d6
+          Arn: !GetAtt StartOmicsRunWorkflow.Arn
+          RoleArn: !GetAtt EventBridgeRole.Arn
+
+  CompletedRunImport:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName: default
+      EventPattern:
+        source:
+          - aws.omics
+        detail-type:
+          - Run Status Change
+        detail:
+          status:
+            - COMPLETED
+      Name: Workflow-CompleteRun
+      State: ENABLED
+      Targets:
+        - Id: Id45b0e372-8590-4ed9-81da-2b35987a57d6
+          Arn: !Ref ImportVariantWorkflow
+          RoleArn: !GetAtt EventBridgeRole.Arn
+
+  #Omics resources
+  OmicsReferenceStore:
+    Type: AWS::Omics::ReferenceStore
+    Properties:
+      Description: Reference Store for Tetra Science Demo
+      Name: DigitalLabRefStore
+
+  OmicsSequenceStore:
+    Type: AWS::Omics::SequenceStore
+    Properties:
+      Description: Sequence Store for Tetra Science Demo
+      Name: DigitalLabSeqStore
+
+  #S3
+  DigitalLabBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      BucketName: !Sub "digitallab-tetraomics-${AWS::AccountId}"
+      LoggingConfiguration:
+        LogFilePrefix: logs
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  #Secrets
+  TetraSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      Name: DigitalLabSecret
+      Description: Secret for TDP connection
+      KmsKeyId: alias/aws/secretsmanager
+      SecretString: !Sub '{"BaseURL": "${TDPAPIEndpoint}", "JWT": "${TDPToken}", "OrgSlug": "${TDPOrg}"}'
+      Tags:
+        - Key: Solution
+          Value: Digital-Lab
+
+  #Database
+  DigitalLabDynamoDB:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: "Id"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "Id"
+          KeyType: HASH
+
+  #Monitoring
+  ApplicationInsightsMonitoring:
+    Type: AWS::ApplicationInsights::Application
+    Properties:
+      ResourceGroupName: !Sub "ApplicationInsights-SAM-${AWS::StackName}"
+      AutoConfigurationEnabled: true
+    DependsOn: ApplicationResourceGroup
+
+  ApplicationResourceGroup:
+    Type: AWS::ResourceGroups::Group
+    Properties:
+      Name: !Sub "ApplicationInsights-SAM-${AWS::StackName}"
+      ResourceQuery:
+        Type: CLOUDFORMATION_STACK_1_0
+
+  #IAM
+  OmicsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Role for running the Digital Lab Solution
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - omics.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+  OmicsPolicy:
+    Type: "AWS::IAM::Policy"
+    Properties:
+      PolicyName: DigitalLab_OmicsPolicyDigitalLab
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - omics:Get*
+              - omics:List*
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+          - Effect: Allow
+            Action:
+              - s3:GetBucketLocation
+              - s3:PutObject
+              - s3:GetObject
+              - s3:ListBucket
+              - s3:AbortMultipartUpload
+              - s3:ListMultipartUploadParts
+              - s3:GetObjectAcl
+              - s3:PutObjectAcl
+            Resource: "*"
+      Roles:
+        - !Ref OmicsRole
+
+  StatesRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Role for running the Digital Lab Solution
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - states.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+  StatesPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: DigitalLab_StatesPolicyDigitalLab
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - omics:StartReadSetImportJob
+              - omics:StartRun
+              - omics:StartVariantImportJob
+              - omics:GetReferenceMetadata
+              - omics:TagResource
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - s3:ListBucket
+            Resource: !GetAtt DigitalLabBucket.Arn
+          - Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource:
+              - !GetAtt StartWorkflow.Arn
+              - !GetAtt TetraUpload.Arn
+              - !GetAtt RefStoreProcessor.Arn
+              - !GetAtt ValidateMetadata.Arn
+          - Effect: Allow
+            Action:
+              - dynamodb:PutItem
+              - dynamodb:GetItem
+            Resource: !GetAtt DigitalLabDynamoDB.Arn
+          - Effect: Allow
+            Action:
+              - states:StartExecution
+            Resource: !GetAtt ErrorLoggingWorkflow.Arn
+          - Effect: Allow
+            Action:
+              - iam:PassRole
+              - iam:GetRole
+            Resource:
+              - !GetAtt OmicsRole.Arn
+      Roles:
+        - !Ref StatesRole
+
+  EventBridgeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Role for running the Digital Lab Solution
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+  EventBridgePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: DigitalLab_StatesPolicyDigitalLab
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - states:StartExecution
+            Resource:
+              - !GetAtt StartOmicsRunWorkflow.Arn
+              - !GetAtt ImportVariantWorkflow.Arn
+      Roles:
+        - !Ref EventBridgeRole

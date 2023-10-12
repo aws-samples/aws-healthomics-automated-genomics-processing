@@ -1,0 +1,96 @@
+{
+  "Comment": "This statemachine will start the Omics Readset import from S3.",
+  "StartAt": "GetReferenceMetadata",
+  "States": {
+    "GetReferenceMetadata": {
+      "Type": "Task",
+      "Parameters": {
+        "Id.$": "$.reference_genome",
+        "ReferenceStoreId.$": "$.ref_store"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:omics:getReferenceMetadata",
+      "Next": "StartReadSetImportJob",
+      "ResultPath": null,
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "ErrorHandling",
+          "ResultPath": "$.Error"
+        }
+      ]
+    },
+    "StartReadSetImportJob": {
+      "Type": "Task",
+      "Parameters": {
+        "RoleArn.$": "$.iam_role",
+        "SequenceStoreId.$": "$.seq_store",
+        "Sources": [
+          {
+            "ReferenceArn.$": "$.ref_arn",
+            "SampleId.$": "$.sample_name",
+            "SourceFileType": "FASTQ",
+            "SourceFiles": {
+              "Source1.$": "States.Format('s3://{}/{}', $.bucket, $.run_params[0].source1)",
+              "Source2.$": "States.Format('s3://{}/{}', $.bucket, $.run_params[0].source2)"
+            },
+            "SubjectId.$": "$.run_params[0].read_group"
+          }
+        ]
+      },
+      "Resource": "arn:aws:states:::aws-sdk:omics:startReadSetImportJob",
+      "ResultPath": "$.ReadSetImportJob",
+      "Next": "DynamoDB PutItem",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "ErrorHandling",
+          "ResultPath": "$.Error"
+        }
+      ]
+    },
+    "DynamoDB PutItem": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:putItem",
+      "Parameters": {
+        "TableName": ${DYNAMO_TABLE},
+        "Item": {
+          "Type": {
+            "S": "ImportReadset"
+          },
+          "Id": {
+            "S.$": "$.ReadSetImportJob.Id"
+          },
+          "Data": {
+            "S.$": "States.JsonToString($)"
+          }
+        }
+      },
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "ErrorHandling",
+          "ResultPath": "$.Error"
+        }
+      ],
+      "End": true,
+    },
+    "ErrorHandling": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::states:startExecution",
+      "Parameters": {
+        "StateMachineArn": ${ERROR_LOGGING_WORKFLOW},
+        "Input": {
+          "StatePayload.$": "$",
+          "AWS_STEP_FUNCTIONS_STARTED_BY_EXECUTION_ID.$": "$$.Execution.Id"
+        }
+      },
+      "End": true
+    }
+  }
+}
