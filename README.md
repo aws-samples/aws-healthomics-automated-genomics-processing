@@ -169,3 +169,59 @@ To download example source files navigate to the Ready2Run workflow and select t
 ![Ready2Run](Resources/Ready2RunWorkflow.png)
 
 Download the files and upload them to your TetraScience data lake to trigger the TetraScience pipeline. The pipeline will places the files onto the S3 bucket, which will finally start the Step Functions workflows. 
+
+
+### Cleanup
+
+If you deployed the solution using AWS CloudFormation you can remove all resources by deleting the solution’s CloudFormation stack. 
+
+Before you can do that, you must delete data in S3 and HealthOmics Storage first.
+
+To empty the staging bucket between the TDP and AWS HealthOmics (console)
+
+1.	Open the AWS CloudFormation console
+2.	In the navigation pane choose **Stacks**
+3.	Select the stack name used when the solution was deployed
+4.	In the stack panel
+  - Select the **Resources** tab
+  - Filter on *DigitalLabBucket*
+  - Select the **Physical ID** link to navigate to the S3 bucket
+5.	In the S3 Bucket
+  - Select all S3 Objects in the bucket
+  - Click on **Delete**
+  - Confirm deletion by typing **permanently delete** in the text input field
+  - Click on **Delete objects**
+
+To delete the AWS HealthOmics Sequence store (console)
+1.	Open the AWS HealthOmics console
+2.	In the navigation pane select **Sequence stores**
+3.	Click on the *DigitalLabSeqStore* sequence store 
+  - Select all the read sets (sequence files)
+  - Click on **Delete**
+4.	In the navigation pane select **Sequence stores** again
+  - Click on **Delete**
+
+To identify the AWS HealthOmics Reference stores (console)
+1.	Open the AWS CloudFormation console
+2.	In the navigation pane choose **Stacks**
+3.	Select the stack name used when the solution was deployed
+4.	In the stack panel
+  - Filter on *OmicsReferenceStore*
+  - Note the numeric **Physical ID**
+
+To delete the AWS HealthOmics Reference stores (AWS CLI)
+1.	From the AWS CLI identify reference files stored in the reference store.
+  - `aws omics list-references --reference-store-id [Physical ID] --region [region]`
+  - Note the numeric *referenceStoreId*’s
+2.	From the AWS CLI delete all reference files from the reference store do this for each *referenceStoreId*
+  - `aws omics delete-reference --reference-store-id [Physical ID] --id [referenceStoreId] --region [region]`
+3.	Delete the reference store from the AWS CLI
+  - `aws omics delete-reference-store --id [Physical ID] --region [region]`
+
+To delete all remaining resources using AWS CloudFormation (console)
+1.	Open the AWS CloudFormation console
+2.	In the navigation pane choose **Stacks**
+3.	Select the stack name used when the solution was deployed
+4.	In the Actions menu, choose **Delete Stack**. 
+
+This deletes the stack, terminates all accompanying AWS resources, and deletes all accompanying IAM roles.
