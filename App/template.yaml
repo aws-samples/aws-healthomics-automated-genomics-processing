@@ -158,6 +158,14 @@ Resources:
                 - iam:GetRole
               Resource:
                 - !GetAtt OmicsRole.Arn
+            - Effect: Allow
+              Action:
+                - ram:AcceptResourceShareInvitation
+                - ram:GetResourceShareInvitations
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  aws:CalledViaLast: "omics.amazonaws.com"
       Events:
         BucketEvent:
           Type: S3
