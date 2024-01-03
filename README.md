@@ -1,5 +1,5 @@
 # Automated genomic data processing with AWS HealthOmics & TetraScience
-This repository holds the Digital Lab solution that powers automated genomics processing engine for TetraScience and Amazon Omics.
+This repository holds the Digital Lab solution that powers automated genomics processing engine for TetraScience and AWS HealthOmics.
 
 ## Summary of Solution
 This repository accompanies this [blog post](https://aws.amazon.com/blogs) and demonstrates how to use [AWS HealthOmics](https://docs.aws.amazon.com/omics/latest/dev/what-is-service.html) along with [TetraSciences’ Scientific Data Cloud](https://www.tetrascience.com/platform/tetra-data-platform) (TDP) to make omics datasets available for downstream analysis while using TDP as the research data lake.  The HealthOmics workflows run in your own account, allowing you to take advantage of predefined workflows, or to define custom workflows for omics processing.
